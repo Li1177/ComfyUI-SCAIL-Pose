@@ -176,7 +176,7 @@ class RenderNLFPoses:
 
     def predict(self, nlf_poses, width, height, dw_poses=None, ref_dw_pose=None, draw_face=True, draw_hands=True):
 
-        from .NLFPoseExtract.nlf_render import render_nlf_as_images, shift_dwpose_according_to_nlf, process_data_to_COCO_format, intrinsic_matrix_from_field_of_view
+        from .NLFPoseExtract.nlf_render import render_nlf_as_images, render_multi_nlf_as_images, shift_dwpose_according_to_nlf, process_data_to_COCO_format, intrinsic_matrix_from_field_of_view
         from .NLFPoseExtract.align3d import solve_new_camera_params_central, solve_new_camera_params_down
 
         if isinstance(nlf_poses, dict):
@@ -230,7 +230,10 @@ class RenderNLFPoses:
         else:
             intrinsic_matrix = ori_camera_pose
 
-        frames_np = render_nlf_as_images(pose_input, dw_pose_input, height, width, len(pose_input), intrinsic_matrix=intrinsic_matrix, draw_face=draw_face, draw_hands=draw_hands)
+        if pose_input[0].shape[0] > 1:
+            frames_np = render_multi_nlf_as_images(pose_input, dw_pose_input, height, width, len(pose_input), intrinsic_matrix=intrinsic_matrix, draw_face=draw_face, draw_hands=draw_hands)
+        else:
+            frames_np = render_nlf_as_images(pose_input, dw_pose_input, height, width, len(pose_input), intrinsic_matrix=intrinsic_matrix, draw_face=draw_face, draw_hands=draw_hands)
 
         frames_tensor = torch.from_numpy(np.stack(frames_np, axis=0)).contiguous() / 255.0
         frames_tensor, mask = frames_tensor[..., :3], frames_tensor[..., -1] > 0.5

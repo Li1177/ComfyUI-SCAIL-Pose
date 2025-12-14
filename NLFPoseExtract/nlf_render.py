@@ -256,10 +256,8 @@ def render_nlf_as_images(smpl_poses, dw_poses, height, width, video_length, intr
     return frames_np_rgba
 
 
-def render_multi_nlf_as_images(data, dw_poses, intrinsic_matrix=None, draw_2d=True):
-    """ return a list of images """
-    height, width = data[0]['video_height'], data[0]['video_width']
-    video_length = len(data)
+def render_multi_nlf_as_images(smpl_poses, dw_poses, height, width, video_length, intrinsic_matrix=None, draw_2d=True, draw_face=True, draw_hands=True):
+
 
     second_person_base_colors_255_dict = {
         # Warm Colors for Right Side (R.) - Red, Orange, Yellow
@@ -368,8 +366,18 @@ def render_multi_nlf_as_images(data, dw_poses, intrinsic_matrix=None, draw_2d=Tr
     colors_first = [[c / 300 + 0.15 for c in color_rgb] + [0.8] for color_rgb in ordered_colors_255_list[0]]
     colors_second = [[c / 300 + 0.15 for c in color_rgb] + [0.8] for color_rgb in ordered_colors_255_list[1]]
 
-    smpl_poses_first, smpl_poses_second = collect_smpl_poses_samurai(data)
+    smpl_poses_first = []
+    smpl_poses_second = []
+    for i in range(video_length):
+        if len(smpl_poses[i]) >= 1:
+            smpl_poses_first.append([smpl_poses[i][0]])  # First person
+        else:
+            smpl_poses_first.append([torch.zeros((24, 3), dtype=torch.float32)])
 
+        if len(smpl_poses[i]) >= 2:
+            smpl_poses_second.append([smpl_poses[i][1]])  # Second person
+        else:
+            smpl_poses_second.append([torch.zeros((24, 3), dtype=torch.float32)])
 
     if intrinsic_matrix is None:
         intrinsic_matrix = intrinsic_matrix_from_field_of_view((height, width))
