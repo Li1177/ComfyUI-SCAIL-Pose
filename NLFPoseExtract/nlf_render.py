@@ -88,10 +88,10 @@ def shift_dwpose_according_to_nlf(smpl_poses, aligned_poses, ori_intrinstics, mo
 
             face[:, 0] += person_joint_15_2d_shift[0] / width
             face[:, 1] += person_joint_15_2d_shift[1] / height
-            right_hand[:, 0] += person_joint_20_2d_shift[0] / width
-            right_hand[:, 1] += person_joint_20_2d_shift[1] / height
-            left_hand[:, 0] += person_joint_21_2d_shift[0] / width
-            left_hand[:, 1] += person_joint_21_2d_shift[1] / height
+            right_hand[:, 0] += person_joint_21_2d_shift[0] / width
+            right_hand[:, 1] += person_joint_21_2d_shift[1] / height
+            left_hand[:, 0] += person_joint_20_2d_shift[0] / width
+            left_hand[:, 1] += person_joint_20_2d_shift[1] / height
             candidate[:, 0] += person_joint_15_2d_shift[0] / width
             candidate[:, 1] += person_joint_15_2d_shift[1] / height
 
