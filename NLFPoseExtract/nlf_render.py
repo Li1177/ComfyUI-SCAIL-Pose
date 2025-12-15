@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import os, platform, copy
+import logging
 
 if platform.system() == 'Linux':
     if 'PYOPENGL_PLATFORM' not in os.environ:
@@ -70,7 +71,11 @@ def shift_dwpose_according_to_nlf(smpl_poses, aligned_poses, ori_intrinstics, mo
     for i in range(len(smpl_poses)):
         persons_joints_list = smpl_poses[i]
         poses_list = aligned_poses[i]
-        # 对里面每一个人，取关节并进行变形；并且修改2d；如果3d不存在，把2d的手/脸也去掉
+        if len(persons_joints_list) != len(poses_list["bodies"]["candidate"]):
+            logging.warning(f"Warning: frame {i} has different number of persons between NLF pose and DW pose. NLF: {len(persons_joints_list)}, DW: {len(poses_list['bodies']['candidate'])}. Skipping shift for this frame.")
+            continue
+
+        # For each person inside, take the joints and deform them; also modify 2D; if 3D does not exist, remove the hand/face from 2D as well
         for person_idx, person_joints in enumerate(persons_joints_list):
             face = poses_list["faces"][person_idx]
             right_hand = poses_list["hands"][2 * person_idx]
