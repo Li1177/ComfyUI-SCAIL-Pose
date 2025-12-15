@@ -204,7 +204,19 @@ class RenderNLFPoses:
 
         if ref_dw_pose is not None:
             ref_dw_pose_input = copy.deepcopy(ref_dw_pose)
-            pose_3d_first_driving_frame = pose_input[0][0].cpu().numpy()
+
+            # Find the first valid pose
+            pose_3d_first_driving_frame = None
+            for pose in pose_input:
+                if pose.shape[0] == 0:
+                    continue
+                candidate = pose[0].cpu().numpy()
+                if np.any(candidate):
+                    pose_3d_first_driving_frame = candidate
+                    break
+            if pose_3d_first_driving_frame is None:
+                raise ValueError("No valid pose found in pose_input.")
+
             pose_3d_coco_first_driving_frame = process_data_to_COCO_format(pose_3d_first_driving_frame)
             poses_2d_ref = ref_dw_pose_input[0]['bodies']['candidate'][0][:14]
             poses_2d_ref[:, 0] = poses_2d_ref[:, 0] * width
