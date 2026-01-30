@@ -80,6 +80,71 @@ def convert_openpose_to_target_format(frames, max_people=2):
         results.append(result)
     return results
 
+def convert_sdpose_to_vitpose_format(openpose_frames):
+    """
+    Convert SDPose/OpenPose WholeBody format (136 points) to VitPose COCO-WholeBody format (133 points).
+
+    OpenPose WholeBody: 18 body + 6 foot + 70 face + 21 left_hand + 21 right_hand = 136 points
+    VitPose COCO-WholeBody: body/foot (22 points) + face (69 points) + left_hand (21) + right_hand (21) = 133 points
+
+    Returns: np.array of shape (num_frames, 133, 3) with [x, y, confidence]
+    """
+    kp2ds_list = []
+
+    for frame in openpose_frames:
+        canvas_width = frame.get('canvas_width', 1)
+        canvas_height = frame.get('canvas_height', 1)
+        people = frame.get('people', [])
+
+        if not people:
+            # Empty frame - create zero array
+            kp2ds_list.append(np.zeros((133, 3)))
+            continue
+
+        person = people[0]  # Take first person only
+
+        # Extract keypoint arrays
+        pose_raw = person.get('pose_keypoints_2d', [])
+        foot_raw = person.get('foot_keypoints_2d', [])
+        face_raw = person.get('face_keypoints_2d', [])
+        hand_left_raw = person.get('hand_left_keypoints_2d', [])
+        hand_right_raw = person.get('hand_right_keypoints_2d', [])
+
+        # Reshape to (N, 3) arrays
+        pose = np.array(pose_raw).reshape(-1, 3) if len(pose_raw) > 0 else np.zeros((18, 3))  # 18 points
+        foot = np.array(foot_raw).reshape(-1, 3) if len(foot_raw) > 0 else np.zeros((6, 3))   # 6 points
+        face = np.array(face_raw).reshape(-1, 3) if len(face_raw) > 0 else np.zeros((70, 3))  # 70 points
+        hand_left = np.array(hand_left_raw).reshape(-1, 3) if len(hand_left_raw) > 0 else np.zeros((21, 3))
+        hand_right = np.array(hand_right_raw).reshape(-1, 3) if len(hand_right_raw) > 0 else np.zeros((21, 3))
+
+        # Build 133-point array
+        # Layout: [0-21: body/foot 22pts, 22-90: face 69pts, 91-111: left_hand 21pts, 112-132: right_hand 21pts]
+        kp2ds = np.zeros((133, 3))
+
+        # Body + Foot -> first 22 points
+        # OpenPose body has 18 points, we need to map to 17 COCO body points + some foot points
+        # Simplified mapping: take first 17 body points + 5 foot points = 22 points
+        if len(pose) >= 17:
+            kp2ds[0:17] = pose[0:17]
+        if len(foot) >= 5:
+            kp2ds[17:22] = foot[0:5]
+
+        # Face: OpenPose 70 points -> VitPose 69 points (skip first point)
+        if len(face) >= 70:
+            kp2ds[22:91] = face[1:70]  # Take points 1-69 (69 points total)
+
+        # Left hand: 21 points
+        if len(hand_left) >= 21:
+            kp2ds[91:112] = hand_left[0:21]
+
+        # Right hand: 21 points
+        if len(hand_right) >= 21:
+            kp2ds[112:133] = hand_right[0:21]
+
+        kp2ds_list.append(kp2ds)
+
+    return np.array(kp2ds_list)
+
 def scale_faces(poses, pose_2d_ref):
     # Input: two lists of dict, poses[0]['faces'].shape: 1, 68, 2  , poses_ref[0]['faces'].shape: 1, 68, 2
     # Scale the facial keypoints in poses according to the center point of the face
@@ -223,19 +288,62 @@ class ConvertOpenPoseKeypointsToDWPose:
         return {
             "required": {
                 "keypoints": ("POSE_KEYPOINT",),
-                "max_people": ("INT", {"default": 2, "min": 1, "max": 100, "step": 1, "tooltip": "Maximum number of people to process per frame"}),
+                "width": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8, "tooltip": "Width of the canvas/image"}),
+                "height": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8, "tooltip": "Height of the canvas/image"}),
             },
+            "optional": {
+                "max_people": ("INT", {"default": 1, "min": 1, "max": 10, "step": 1, "tooltip": "Maximum number of people to process (default 1 for SDPose)"}),
+            }
         }
 
     RETURN_TYPES = ("DWPOSES",)
     RETURN_NAMES = ("dw_poses",)
     FUNCTION = "process"
     CATEGORY = "WanAnimatePreprocess"
-    DESCRIPTION = "Convert OpenPose format keypoints to DWPose format."
+    DESCRIPTION = "Convert SDPose/OpenPose WholeBody keypoints to DWPose format using VitPose processing pipeline. This replicates the full processing logic from PoseDetectionVitPoseToDWPose for Q-version characters."
 
-    def process(self, keypoints, max_people=2):
-        swap_hands = False
-        out_dict = {"poses": convert_openpose_to_target_format(keypoints, max_people=max_people), "swap_hands": swap_hands}
+    def process(self, keypoints, width, height, max_people=1):
+        """
+        Process SDPose/OpenPose keypoints through the VitPose pipeline.
+
+        This node:
+        1. Converts OpenPose WholeBody (136 points) to VitPose format (133 points)
+        2. Applies temporal consistency processing (load_pose_metas_from_kp2ds_seq)
+        3. Converts to final DWPose format (aaposemeta_to_dwpose_scail)
+
+        This ensures compatibility with RenderNLFPoses for Q-version characters that
+        VitPose cannot detect directly.
+        """
+        # Handle different input formats
+        if isinstance(keypoints, dict):
+            if 'poses' in keypoints:
+                # Already converted DWPOSES format - pass through
+                return keypoints,
+            elif 'people' in keypoints:
+                # Single frame OpenPose format
+                frames = [keypoints]
+            else:
+                raise ValueError("Unknown keypoint format")
+        elif isinstance(keypoints, list):
+            # List of frames
+            frames = keypoints
+        else:
+            raise ValueError(f"Unsupported keypoints type: {type(keypoints)}")
+
+        # Convert OpenPose WholeBody format to VitPose 133-point format
+        kp2ds_seq = convert_sdpose_to_vitpose_format(frames)
+
+        # Apply VitPose processing pipeline
+        # This includes temporal consistency and keypoint remapping
+        pose_metas = load_pose_metas_from_kp2ds_seq(kp2ds_seq, width=width, height=height)
+
+        # Convert to final DWPose format with proper subset marking
+        dwposes = [aaposemeta_to_dwpose_scail(meta) for meta in pose_metas]
+
+        # Use swap_hands=True to match PoseDetectionVitPoseToDWPose output
+        swap_hands = True
+        out_dict = {"poses": dwposes, "swap_hands": swap_hands}
+
         return out_dict,
 
 
