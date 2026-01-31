@@ -89,7 +89,16 @@ def convert_sdpose_to_vitpose_format(openpose_frames):
 
     Returns: np.array of shape (num_frames, 133, 3) with [x, y, confidence]
     """
+    import os
+    import json
+
+    # Setup debug directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    debug_dir = os.path.join(current_dir, "debug_logs")
+    os.makedirs(debug_dir, exist_ok=True)
+
     kp2ds_list = []
+    frame_idx = 0
 
     for frame in openpose_frames:
         canvas_width = frame.get('canvas_width', 1)
@@ -117,6 +126,23 @@ def convert_sdpose_to_vitpose_format(openpose_frames):
         hand_left = np.array(hand_left_raw).reshape(-1, 3) if len(hand_left_raw) > 0 else np.zeros((21, 3))
         hand_right = np.array(hand_right_raw).reshape(-1, 3) if len(hand_right_raw) > 0 else np.zeros((21, 3))
 
+        # DEBUG: Save first frame input data
+        if frame_idx == 0:
+            try:
+                debug_data = {
+                    "step": "1_input_original",
+                    "canvas_width": canvas_width,
+                    "canvas_height": canvas_height,
+                    "face_raw_length": len(face_raw),
+                    "face_shape": face.shape,
+                    "face_first_5_points": face[:5].tolist() if len(face) > 0 else [],
+                    "face_has_nonzero": bool(np.any(face != 0))
+                }
+                with open(os.path.join(debug_dir, "q_step1_input.json"), 'w') as f:
+                    json.dump(debug_data, f, indent=2)
+            except Exception as e:
+                print(f"Debug save failed: {e}")
+
         # Build 133-point array
         # Layout: [0-21: body/foot 22pts, 22-90: face 69pts, 91-111: left_hand 21pts, 112-132: right_hand 21pts]
         kp2ds = np.zeros((133, 3))
@@ -141,7 +167,24 @@ def convert_sdpose_to_vitpose_format(openpose_frames):
         if len(hand_right) >= 21:
             kp2ds[112:133] = hand_right[0:21]
 
+        # DEBUG: Save first frame converted data
+        if frame_idx == 0:
+            try:
+                debug_data = {
+                    "step": "2_after_convert",
+                    "kp2ds_face_indices": "22:91",
+                    "kp2ds_face_shape": kp2ds[22:91].shape,
+                    "kp2ds_face_first_5": kp2ds[22:95].tolist(),
+                    "kp2ds_face_has_nonzero": bool(np.any(kp2ds[22:91] != 0)),
+                    "kp2ds_face_min_max": [float(kp2ds[22:91].min()), float(kp2ds[22:91].max())]
+                }
+                with open(os.path.join(debug_dir, "q_step2_convert.json"), 'w') as f:
+                    json.dump(debug_data, f, indent=2)
+            except Exception as e:
+                print(f"Debug save failed: {e}")
+
         kp2ds_list.append(kp2ds)
+        frame_idx += 1
 
     return np.array(kp2ds_list)
 
@@ -337,8 +380,48 @@ class ConvertOpenPoseKeypointsToDWPose:
         # This includes temporal consistency and keypoint remapping
         pose_metas = load_pose_metas_from_kp2ds_seq(kp2ds_seq, width=width, height=height)
 
+        # DEBUG: Save pose_metas keypoints_face
+        try:
+            import os, json
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            debug_dir = os.path.join(current_dir, "debug_logs")
+            if len(pose_metas) > 0:
+                face_kp = pose_metas[0].get('keypoints_face', None)
+                debug_data = {
+                    "step": "3_after_load_pose_metas",
+                    "width_used": width,
+                    "height_used": height,
+                    "face_shape": face_kp.shape if face_kp is not None else None,
+                    "face_first_5": face_kp[:5].tolist() if face_kp is not None and len(face_kp) > 0 else [],
+                    "face_has_nonzero": bool(np.any(face_kp != 0)) if face_kp is not None else False,
+                    "face_min_max": [float(face_kp.min()), float(face_kp.max())] if face_kp is not None and len(face_kp) > 0 else [0, 0]
+                }
+                with open(os.path.join(debug_dir, "q_step3_metas.json"), 'w') as f:
+                    json.dump(debug_data, f, indent=2)
+        except Exception as e:
+            print(f"Debug save failed: {e}")
+
         # Convert to final DWPose format with proper subset marking
         dwposes = [aaposemeta_to_dwpose_scail(meta) for meta in pose_metas]
+
+        # DEBUG: Save final dwpose faces
+        try:
+            import os, json
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            debug_dir = os.path.join(current_dir, "debug_logs")
+            if len(dwposes) > 0:
+                faces = dwposes[0].get('faces', None)
+                debug_data = {
+                    "step": "4_final_dwpose",
+                    "faces_shape": faces.shape if faces is not None else None,
+                    "faces_first_5": faces[0, :5].tolist() if faces is not None and len(faces) > 0 else [],
+                    "faces_has_nonzero": bool(np.any(faces != 0)) if faces is not None else False,
+                    "faces_min_max": [float(faces.min()), float(faces.max())] if faces is not None and faces.size > 0 else [0, 0]
+                }
+                with open(os.path.join(debug_dir, "q_step4_final.json"), 'w') as f:
+                    json.dump(debug_data, f, indent=2)
+        except Exception as e:
+            print(f"Debug save failed: {e}")
 
         # Use swap_hands=True to match PoseDetectionVitPoseToDWPose output
         swap_hands = True
