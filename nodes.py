@@ -155,9 +155,15 @@ def convert_sdpose_to_vitpose_format(openpose_frames):
         if len(foot) >= 5:
             kp2ds[17:22] = foot[0:5]
 
-        # Face: OpenPose 70 points -> VitPose 69 points (skip first point)
-        if len(face) >= 70:
-            kp2ds[22:91] = face[1:70]  # Take points 1-69 (69 points total)
+        # Face: Adapt to SDPose output (68 points) to VitPose format (69 points)
+        # VitPose expects kp2ds[22:91] = 69 points
+        # aaposemeta_to_dwpose_scail will skip first point [1:], using remaining 68
+        if len(face) >= 68:
+            # SDPose outputs 68 face points, we need 69 for VitPose
+            # Put face[0] at index 22 (will be skipped by aaposemeta)
+            # Put all 68 points at indices 23-90
+            kp2ds[22] = face[0]
+            kp2ds[23:91] = face[0:68]
 
         # Left hand: 21 points
         if len(hand_left) >= 21:
